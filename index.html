@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>甘特圖排程系統</title>
+  
+  <!-- 引入 Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 引入 Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    /* 自訂拖曳時的視覺回饋樣式 */
+    .drag-over-zone {
+      background-color: #eff6ff !important; /* Tailwind blue-50 */
+      border-color: #bfdbfe !important; /* Tailwind blue-200 */
+    }
+    .drag-over-pool {
+      background-color: rgba(239, 246, 255, 0.5) !important;
+      outline: 2px dashed #93c5fd !important; /* Tailwind blue-300 */
+      outline-offset: -4px;
+    }
+    /* 隱藏捲軸但保留捲動功能 (選用) */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+<body class="flex h-screen bg-white text-gray-800 font-sans overflow-hidden">
+
+  <!-- 左側：未分配任務池 -->
+  <div class="w-80 bg-gray-50 border-r flex flex-col z-20 shadow-sm">
+    <div class="p-4 border-b bg-white flex items-center justify-between">
+      <div class="flex items-center space-x-2 font-bold text-gray-700">
+        <i data-lucide="briefcase" class="text-blue-600 w-5 h-5"></i>
+        <span>待分配任務庫</span>
+      </div>
+      <span id="unassigned-count" class="bg-blue-100 text-blue-800 text-xs py-1 px-2 rounded-full font-mono font-bold">
+        0
+      </span>
+    </div>
+    
+    <div 
+      id="pool-zone"
+      class="flex-1 p-4 overflow-y-auto transition-all"
+      ondragover="handleDragOver(event, 'pool-zone', true)"
+      ondragleave="handleDragLeave(event, 'pool-zone', true)"
+      ondrop="handleDrop(event, null, null, 'pool-zone', true)"
+    >
+      <!-- 任務卡片將由 JS 動態生成 -->
+    </div>
+  </div>
+
+  <!-- 右側：甘特圖時間軸主體 -->
+  <div class="flex-1 flex flex-col min-w-0">
+    
+    <!-- 工具列與導航 -->
+    <div class="h-16 border-b flex items-center justify-between px-6 bg-white shrink-0">
+      <h1 class="text-xl font-bold flex items-center space-x-2">
+        <i data-lucide="calendar" class="text-gray-600 w-6 h-6"></i>
+        <span>長期專案排程甘特圖</span>
+      </h1>
+      <div class="flex items-center space-x-4">
+        <button onclick="shiftDays(-7)" class="p-2 hover:bg-gray-100 rounded text-gray-600 border shadow-sm">
+          <i data-lucide="chevron-left" class="w-5 h-5"></i>
+        </button>
+        <div id="date-range-display" class="font-mono font-medium text-gray-700 bg-gray-50 px-4 py-1.5 rounded border">
+          <!-- 日期區間將由 JS 動態生成 -->
+        </div>
+        <button onclick="shiftDays(7)" class="p-2 hover:bg-gray-100 rounded text-gray-600 border shadow-sm">
+          <i data-lucide="chevron-right" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- 捲動區域 -->
+    <div class="flex-1 overflow-auto relative bg-gray-50/30">
+      <div class="min-w-max">
+        
+        <!-- 時間軸表頭 (X軸) -->
+        <div id="gantt-header" class="flex border-b bg-white sticky top-0 z-10 shadow-sm">
+          <!-- 表頭由 JS 動態生成 -->
+        </div>
+
+        <!-- 同仁列 (Y軸) -->
+        <div id="gantt-body">
+          <!-- 網格與任務由 JS 動態生成 -->
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- 核心常數與工具函數 ---
+    const MS_PER_DAY = 1000 * 60 * 60 * 24;
+    const VISIBLE_DAYS = 14;
+    const CELL_WIDTH = 120;
+    const ROW_MIN_HEIGHT = 80;
+    const TASK_HEIGHT = 36;
+    const TASK_GAP = 4;
+    const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+
+    const formatDate = (date) => {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    };
+    const parseDate = (str) => new Date(str + 'T00:00:00');
+    const getDaysDiff = (d1, d2) => Math.round((d2 - d1) / MS_PER_DAY);
+    const addDays = (date, days) => {
+      const res = new Date(date);
+      res.setDate(res.getDate() + days);
+      return res;
+    };
+
+    // --- 初始狀態資料 ---
+    const colleagues = [
+      { id: 'c1', name: '王老師', role: '課程研發' },
+      { id: 'c2', name: '林老師', role: '行為分析' },
+      { id: 'c3', name: '陳治療師', role: '職能治療' },
+    ];
+
+    let tasks = [
+      { id: 't1', title: '編寫適應體育教案', color: 'bg-blue-200 border-blue-400 text-blue-900', assigneeId: 'c1', startDate: '2026-03-23', endDate: '2026-03-26', duration: 4 },
+      { id: 't2', title: '設計行為介入方案(BIP)', color: 'bg-red-200 border-red-400 text-red-900', assigneeId: 'c2', startDate: '2026-03-24', endDate: '2026-03-25', duration: 2 },
+      { id: 't3', title: '跨專業團隊個案研討會', color: 'bg-amber-200 border-amber-400 text-amber-900', assigneeId: 'c1', startDate: '2026-03-25', endDate: '2026-03-25', duration: 1 },
+      { id: 't4', title: '感覺統合教具採購評估', color: 'bg-green-200 border-green-400 text-green-900', assigneeId: null, startDate: null, endDate: null, duration: 3 },
+      { id: 't5', title: '情境圖卡視覺教材繪製', color: 'bg-teal-200 border-teal-400 text-teal-900', assigneeId: null, startDate: null, endDate: null, duration: 2 },
+    ];
+
+    let viewStartDate = parseDate('2026-03-23');
+
+    // --- 拖曳事件處理 (掛載於全域 window) ---
+    window.handleDragStart = (e, taskId) => {
+      e.dataTransfer.setData('taskId', taskId);
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => { e.target.style.opacity = '0.4'; }, 0);
+    };
+
+    window.handleDragEnd = (e) => {
+      e.target.style.opacity = '1';
+    };
+
+    window.handleDragOver = (e, targetId, isPool = false) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const el = document.getElementById(targetId);
+      if (el) {
+        el.classList.add(isPool ? 'drag-over-pool' : 'drag-over-zone');
+      }
+    };
+
+    window.handleDragLeave = (e, targetId, isPool = false) => {
+      e.preventDefault();
+      const el = document.getElementById(targetId);
+      if (el) {
+        el.classList.remove(isPool ? 'drag-over-pool' : 'drag-over-zone');
+      }
+    };
+
+    window.handleDrop = (e, assigneeId, dateStr, targetId, isPool = false) => {
+      e.preventDefault();
+      const el = document.getElementById(targetId);
+      if (el) el.classList.remove(isPool ? 'drag-over-pool' : 'drag-over-zone');
+
+      const taskId = e.dataTransfer.getData('taskId');
+      if (!taskId) return;
+
+      const taskIndex = tasks.findIndex(t => t.id === taskId);
+      if (taskIndex === -1) return;
+
+      const task = tasks[taskIndex];
+
+      if (!assigneeId || !dateStr) {
+        // 放回待分配庫
+        task.assigneeId = null;
+        task.startDate = null;
+        task.endDate = null;
+      } else {
+        // 分配到網格
+        const newStart = parseDate(dateStr);
+        const duration = task.startDate ? (getDaysDiff(parseDate(task.startDate), parseDate(task.endDate)) + 1) : task.duration;
+        const newEnd = addDays(newStart, duration - 1);
+        
+        task.assigneeId = assigneeId;
+        task.startDate = formatDate(newStart);
+        task.endDate = formatDate(newEnd);
+      }
+
+      renderApp(); // 重新渲染畫面
+    };
+
+    window.shiftDays = (days) => {
+      viewStartDate = addDays(viewStartDate, days);
+      renderApp();
+    };
+
+    // --- 計算重疊避免遮蔽 (泳道演算法) ---
+    const getColleagueLanes = (colleagueId) => {
+      const colleagueTasks = tasks.filter(t => t.assigneeId === colleagueId && t.startDate);
+      const sorted = [...colleagueTasks].sort((a, b) => parseDate(a.startDate) - parseDate(b.startDate));
+      
+      const lanes = []; 
+      const taskLayouts = {}; 
+
+      sorted.forEach(task => {
+        const start = parseDate(task.startDate).getTime();
+        const end = parseDate(task.endDate).getTime();
+        let placed = false;
+        
+        for (let i = 0; i < lanes.length; i++) {
+          if (start > lanes[i]) {
+            lanes[i] = end;
+            taskLayouts[task.id] = i;
+            placed = true;
+            break;
+          }
+        }
+        
+        if (!placed) {
+          lanes.push(end);
+          taskLayouts[task.id] = lanes.length - 1;
+        }
+      });
+
+      return { taskLayouts, totalLanes: Math.max(1, lanes.length) };
+    };
+
+    // --- 渲染邏輯 ---
+    const renderApp = () => {
+      const viewDays = Array.from({ length: VISIBLE_DAYS }).map((_, i) => addDays(viewStartDate, i));
+      const todayStr = formatDate(new Date('2026-03-23')); // 模擬今日
+
+      // 1. 更新日期範圍顯示
+      document.getElementById('date-range-display').textContent = 
+        `${formatDate(viewDays[0])} ~ ${formatDate(viewDays[VISIBLE_DAYS - 1])}`;
+
+      // 2. 渲染左側待分配任務
+      const unassignedTasks = tasks.filter(t => !t.assigneeId || !t.startDate);
+      document.getElementById('unassigned-count').textContent = unassignedTasks.length;
+      
+      const poolHtml = unassignedTasks.length === 0 
+        ? `<div class="h-full flex items-center justify-center text-gray-400 text-sm">已全數排定</div>`
+        : unassignedTasks.map(task => `
+          <div
+            draggable="true"
+            ondragstart="handleDragStart(event, '${task.id}')"
+            ondragend="handleDragEnd(event)"
+            class="p-3 mb-3 border rounded shadow-sm cursor-move hover:shadow-md transition-shadow ${task.color}"
+          >
+            <div class="flex items-start">
+              <i data-lucide="grip-vertical" class="mr-2 mt-0.5 w-4 h-4 opacity-50 flex-shrink-0"></i>
+              <div>
+                <div class="text-sm font-bold leading-tight">${task.title}</div>
+                <div class="mt-2 text-xs opacity-75 flex items-center space-x-1">
+                  <i data-lucide="clock" class="w-3 h-3"></i>
+                  <span>預估工期: ${task.duration} 天</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      document.getElementById('pool-zone').innerHTML = poolHtml;
+
+      // 3. 渲染 X 軸表頭
+      let headerHtml = `
+        <div class="w-56 shrink-0 border-r bg-gray-50 p-4 font-semibold text-gray-600 sticky left-0 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+          同仁 \\ 日期
+        </div>
+      `;
+      viewDays.forEach(day => {
+        const dateStr = formatDate(day);
+        const isToday = dateStr === todayStr;
+        headerHtml += `
+          <div class="shrink-0 border-r flex flex-col items-center justify-center py-2 ${isToday ? 'bg-blue-50 text-blue-700' : 'text-gray-600'}" style="width: ${CELL_WIDTH}px">
+            <span class="text-xs uppercase opacity-70">${DAY_NAMES[day.getDay()]}</span>
+            <span class="font-mono text-lg ${isToday ? 'font-bold' : ''}">${String(day.getDate()).padStart(2, '0')}</span>
+          </div>
+        `;
+      });
+      document.getElementById('gantt-header').innerHTML = headerHtml;
+
+      // 4. 渲染 Y 軸同仁與網格
+      let bodyHtml = '';
+      colleagues.forEach(colleague => {
+        const { taskLayouts, totalLanes } = getColleagueLanes(colleague.id);
+        const dynamicRowHeight = Math.max(ROW_MIN_HEIGHT, totalLanes * (TASK_HEIGHT + TASK_GAP) + 20);
+
+        // 左側同仁資訊
+        let rowHtml = `
+          <div class="flex border-b relative group">
+            <div class="w-56 shrink-0 border-r bg-white p-4 sticky left-0 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] group-hover:bg-gray-50 transition-colors">
+              <div class="flex items-center space-x-3">
+                <div class="bg-gray-100 p-2 rounded-full text-gray-500">
+                  <i data-lucide="user" class="w-5 h-5"></i>
+                </div>
+                <div>
+                  <div class="font-bold text-gray-800">${colleague.name}</div>
+                  <div class="text-xs text-gray-500">${colleague.role}</div>
+                </div>
+              </div>
+            </div>
+            <div class="flex relative" style="height: ${dynamicRowHeight}px">
+        `;
+
+        // 渲染背景網格 (Drop Zones)
+        viewDays.forEach(day => {
+          const dateStr = formatDate(day);
+          const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+          const cellId = `cell-${colleague.id}-${dateStr}`;
+          
+          rowHtml += `
+            <div 
+              id="${cellId}"
+              class="shrink-0 border-r transition-colors ${isWeekend ? 'bg-gray-100/50' : 'bg-white'}"
+              style="width: ${CELL_WIDTH}px"
+              ondragover="handleDragOver(event, '${cellId}')"
+              ondragleave="handleDragLeave(event, '${cellId}')"
+              ondrop="handleDrop(event, '${colleague.id}', '${dateStr}', '${cellId}')"
+            ></div>
+          `;
+        });
+
+        // 渲染絕對定位任務條
+        const viewEndObj = addDays(viewStartDate, VISIBLE_DAYS - 1);
+        const assignedTasks = tasks.filter(t => t.assigneeId === colleague.id && t.startDate);
+        
+        assignedTasks.forEach(task => {
+          const startObj = parseDate(task.startDate);
+          const endObj = parseDate(task.endDate);
+          
+          if (endObj < viewStartDate || startObj > viewEndObj) return; // 畫面外不渲染
+
+          const offsetDays = getDaysDiff(viewStartDate, startObj);
+          const durationDays = getDaysDiff(startObj, endObj) + 1;
+          
+          const leftOffset = offsetDays * CELL_WIDTH;
+          const width = durationDays * CELL_WIDTH;
+          const topOffset = 10 + (taskLayouts[task.id] || 0) * (TASK_HEIGHT + TASK_GAP);
+
+          rowHtml += `
+            <div
+              draggable="true"
+              ondragstart="handleDragStart(event, '${task.id}')"
+              ondragend="handleDragEnd(event)"
+              class="absolute rounded border shadow-sm cursor-move overflow-hidden whitespace-nowrap text-ellipsis px-2 py-1 flex items-center transition-all hover:brightness-95 hover:shadow-md z-10 ${task.color}"
+              style="left: ${leftOffset}px; width: ${width - 8}px; top: ${topOffset}px; height: ${TASK_HEIGHT}px; margin-left: 4px;"
+              title="${task.title} (${task.startDate} ~ ${task.endDate})"
+            >
+              <i data-lucide="grip-vertical" class="mr-1 w-3.5 h-3.5 opacity-50 flex-shrink-0"></i>
+              <span class="text-xs font-bold leading-none truncate">${task.title}</span>
+            </div>
+          `;
+        });
+
+        rowHtml += `</div></div>`;
+        bodyHtml += rowHtml;
+      });
+
+      document.getElementById('gantt-body').innerHTML = bodyHtml;
+
+      // 重新生成 Lucide Icons (因為 DOM 已被替換)
+      lucide.createIcons();
+    };
+
+    // --- 系統初始化 ---
+    document.addEventListener('DOMContentLoaded', renderApp);
+
+  </script>
+</body>
+</html>
