@@ -46,10 +46,48 @@
     ::-webkit-scrollbar-thumb:hover {
       background: #94a3b8;
     }
+
+    /* 縮放把手：預設隱藏指示器，hover 時顯示 */
+    .task-bar .resize-handle::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 3px;
+      height: 16px;
+      border-left: 2px dotted transparent;
+      transition: border-color 0.15s;
+    }
+
+    .task-bar:hover .resize-handle::after {
+      border-left-color: rgba(0, 0, 0, 0.35);
+    }
+
+    .task-bar:hover .resize-handle {
+      background: rgba(0, 0, 0, 0.08);
+    }
+
+    /* 縮放中顯示日期提示 */
+    .resize-tooltip {
+      position: fixed;
+      pointer-events: none;
+      background: #1e293b;
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+      z-index: 9999;
+      transform: translate(-50%, -120%);
+    }
   </style>
 </head>
 
 <body class="flex h-screen bg-white text-gray-800 font-sans overflow-hidden">
+  <!-- 縮放時的日期提示 -->
+  <div id="resize-tooltip" class="resize-tooltip" style="display:none;"></div>
 
   <!-- 左側：未分配任務池 -->
   <div class="w-80 bg-gray-50 border-r flex flex-col z-20 shadow-sm">
@@ -186,7 +224,7 @@
 
       if (resizeDirection === 'right') {
         let newEnd = addDays(resizeStartEndObj, deltaDays);
-        if (newEnd < parseDate(task.startDate)) newEnd = parseDate(task.startDate); // 最少保留 1 天
+        if (newEnd < parseDate(task.startDate)) newEnd = parseDate(task.startDate);
         task.endDate = formatDate(newEnd);
       } else if (resizeDirection === 'left') {
         let newStart = addDays(resizeStartStartObj, deltaDays);
@@ -197,6 +235,13 @@
       // 即時重新計算工期
       task.duration = getDaysDiff(parseDate(task.startDate), parseDate(task.endDate)) + 1;
 
+      // 顯示日期與工期提示
+      const tooltip = document.getElementById('resize-tooltip');
+      tooltip.style.display = 'block';
+      tooltip.style.left = e.pageX + 'px';
+      tooltip.style.top = e.pageY + 'px';
+      tooltip.textContent = `${task.startDate} ~ ${task.endDate}（${task.duration} 天）`;
+
       renderApp();
     };
 
@@ -204,6 +249,7 @@
     window.stopResize = () => {
       resizingTaskId = null;
       document.body.classList.remove('cursor-ew-resize', 'select-none');
+      document.getElementById('resize-tooltip').style.display = 'none';
       window.removeEventListener('mousemove', handleResizeMove);
       window.removeEventListener('mouseup', stopResize);
     };
@@ -431,22 +477,22 @@
               draggable="true"
               ondragstart="handleDragStart(event, '${task.id}')"
               ondragend="handleDragEnd(event)"
-              class="absolute rounded border shadow-sm cursor-move overflow-hidden whitespace-nowrap text-ellipsis flex items-center ${transitionClass} hover:brightness-95 hover:shadow-md z-10 ${task.color}"
+              class="task-bar absolute rounded border shadow-sm cursor-move overflow-hidden whitespace-nowrap text-ellipsis flex items-center ${transitionClass} hover:brightness-95 hover:shadow-md z-10 ${task.color}"
               style="left: ${leftOffset}px; width: ${width - 8}px; top: ${topOffset}px; height: ${TASK_HEIGHT}px; margin-left: 4px;"
               title="${task.title} (${task.startDate} ~ ${task.endDate})"
             >
               <!-- 左側縮放把手 -->
-              <div 
-                class="resize-handle absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black/20 z-20" 
+              <div
+                class="resize-handle absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize rounded-l z-20"
                 onmousedown="initResize(event, '${task.id}', 'left')">
               </div>
 
-              <i data-lucide="grip-vertical" class="ml-2.5 mr-1 w-3.5 h-3.5 opacity-50 flex-shrink-0"></i>
-              <span class="text-xs font-bold leading-none truncate pr-3">${task.title}</span>
+              <i data-lucide="grip-vertical" class="ml-3.5 mr-1 w-3.5 h-3.5 opacity-50 flex-shrink-0"></i>
+              <span class="text-xs font-bold leading-none truncate pr-4">${task.title}</span>
 
               <!-- 右側縮放把手 -->
-              <div 
-                class="resize-handle absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black/20 z-20" 
+              <div
+                class="resize-handle absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize rounded-r z-20"
                 onmousedown="initResize(event, '${task.id}', 'right')">
               </div>
             </div>
