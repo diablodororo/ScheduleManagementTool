@@ -1,34 +1,54 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>甘特圖排程系統</title>
-  
+  <title>工作排程系統</title>
+
   <!-- 引入 Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  
+
   <!-- 引入 Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
   <style>
     /* 自訂拖曳時的視覺回饋樣式 */
     .drag-over-zone {
-      background-color: #eff6ff !important; /* Tailwind blue-50 */
-      border-color: #bfdbfe !important; /* Tailwind blue-200 */
+      background-color: #eff6ff !important;
+      /* Tailwind blue-50 */
+      border-color: #bfdbfe !important;
+      /* Tailwind blue-200 */
     }
+
     .drag-over-pool {
       background-color: rgba(239, 246, 255, 0.5) !important;
-      outline: 2px dashed #93c5fd !important; /* Tailwind blue-300 */
+      outline: 2px dashed #93c5fd !important;
+      /* Tailwind blue-300 */
       outline-offset: -4px;
     }
+
     /* 隱藏捲軸但保留捲動功能 (選用) */
-    ::-webkit-scrollbar { width: 8px; height: 8px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
   </style>
 </head>
+
 <body class="flex h-screen bg-white text-gray-800 font-sans overflow-hidden">
 
   <!-- 左側：未分配任務池 -->
@@ -42,21 +62,17 @@
         0
       </span>
     </div>
-    
-    <div 
-      id="pool-zone"
-      class="flex-1 p-4 overflow-y-auto transition-all"
-      ondragover="handleDragOver(event, 'pool-zone', true)"
-      ondragleave="handleDragLeave(event, 'pool-zone', true)"
-      ondrop="handleDrop(event, null, null, 'pool-zone', true)"
-    >
+
+    <div id="pool-zone" class="flex-1 p-4 overflow-y-auto transition-all"
+      ondragover="handleDragOver(event, 'pool-zone', true)" ondragleave="handleDragLeave(event, 'pool-zone', true)"
+      ondrop="handleDrop(event, null, null, 'pool-zone', true)">
       <!-- 任務卡片將由 JS 動態生成 -->
     </div>
   </div>
 
   <!-- 右側：甘特圖時間軸主體 -->
   <div class="flex-1 flex flex-col min-w-0">
-    
+
     <!-- 工具列與導航 -->
     <div class="h-16 border-b flex items-center justify-between px-6 bg-white shrink-0">
       <h1 class="text-xl font-bold flex items-center space-x-2">
@@ -79,7 +95,7 @@
     <!-- 捲動區域 -->
     <div class="flex-1 overflow-auto relative bg-gray-50/30">
       <div class="min-w-max">
-        
+
         <!-- 時間軸表頭 (X軸) -->
         <div id="gantt-header" class="flex border-b bg-white sticky top-0 z-10 shadow-sm">
           <!-- 表頭由 JS 動態生成 -->
@@ -132,8 +148,74 @@
 
     let viewStartDate = parseDate('2026-03-23');
 
-    // --- 拖曳事件處理 (掛載於全域 window) ---
+    // --- 拖曳縮放事件狀態 (Resize Logic) ---
+    let resizingTaskId = null;
+    let resizeDirection = null; // 'left' 或 'right'
+    let resizeStartX = 0;
+    let resizeStartStartObj = null;
+    let resizeStartEndObj = null;
+
+    // 初始化縮放
+    window.initResize = (e, taskId, direction) => {
+      e.stopPropagation(); // 阻止事件向上冒泡
+      e.preventDefault();  // 阻止觸發 HTML5 預設的 drag-start
+
+      resizingTaskId = taskId;
+      resizeDirection = direction;
+      resizeStartX = e.pageX;
+
+      const task = tasks.find(t => t.id === taskId);
+      resizeStartStartObj = parseDate(task.startDate);
+      resizeStartEndObj = parseDate(task.endDate);
+
+      // 加入全域樣式，防止滑鼠選取文字並鎖定鼠標樣式
+      document.body.classList.add('cursor-ew-resize', 'select-none');
+
+      window.addEventListener('mousemove', handleResizeMove);
+      window.addEventListener('mouseup', stopResize);
+    };
+
+    // 處理拖曳縮放過程
+    window.handleResizeMove = (e) => {
+      if (!resizingTaskId) return;
+
+      const dx = e.pageX - resizeStartX;
+      const deltaDays = Math.round(dx / CELL_WIDTH);
+
+      const task = tasks.find(t => t.id === resizingTaskId);
+
+      if (resizeDirection === 'right') {
+        let newEnd = addDays(resizeStartEndObj, deltaDays);
+        if (newEnd < parseDate(task.startDate)) newEnd = parseDate(task.startDate); // 最少保留 1 天
+        task.endDate = formatDate(newEnd);
+      } else if (resizeDirection === 'left') {
+        let newStart = addDays(resizeStartStartObj, deltaDays);
+        if (newStart > parseDate(task.endDate)) newStart = parseDate(task.endDate);
+        task.startDate = formatDate(newStart);
+      }
+
+      // 即時重新計算工期
+      task.duration = getDaysDiff(parseDate(task.startDate), parseDate(task.endDate)) + 1;
+
+      renderApp();
+    };
+
+    // 結束縮放
+    window.stopResize = () => {
+      resizingTaskId = null;
+      document.body.classList.remove('cursor-ew-resize', 'select-none');
+      window.removeEventListener('mousemove', handleResizeMove);
+      window.removeEventListener('mouseup', stopResize);
+    };
+
+
+    // --- 拖曳移動事件處理 (Drag & Drop Logic) ---
     window.handleDragStart = (e, taskId) => {
+      // 確保不是在點擊縮放區時觸發移動
+      if (e.target.classList.contains('resize-handle')) {
+        e.preventDefault();
+        return;
+      }
       e.dataTransfer.setData('taskId', taskId);
       e.dataTransfer.effectAllowed = 'move';
       setTimeout(() => { e.target.style.opacity = '0.4'; }, 0);
@@ -183,7 +265,7 @@
         const newStart = parseDate(dateStr);
         const duration = task.startDate ? (getDaysDiff(parseDate(task.startDate), parseDate(task.endDate)) + 1) : task.duration;
         const newEnd = addDays(newStart, duration - 1);
-        
+
         task.assigneeId = assigneeId;
         task.startDate = formatDate(newStart);
         task.endDate = formatDate(newEnd);
@@ -201,15 +283,15 @@
     const getColleagueLanes = (colleagueId) => {
       const colleagueTasks = tasks.filter(t => t.assigneeId === colleagueId && t.startDate);
       const sorted = [...colleagueTasks].sort((a, b) => parseDate(a.startDate) - parseDate(b.startDate));
-      
-      const lanes = []; 
-      const taskLayouts = {}; 
+
+      const lanes = [];
+      const taskLayouts = {};
 
       sorted.forEach(task => {
         const start = parseDate(task.startDate).getTime();
         const end = parseDate(task.endDate).getTime();
         let placed = false;
-        
+
         for (let i = 0; i < lanes.length; i++) {
           if (start > lanes[i]) {
             lanes[i] = end;
@@ -218,7 +300,7 @@
             break;
           }
         }
-        
+
         if (!placed) {
           lanes.push(end);
           taskLayouts[task.id] = lanes.length - 1;
@@ -234,14 +316,14 @@
       const todayStr = formatDate(new Date('2026-03-23')); // 模擬今日
 
       // 1. 更新日期範圍顯示
-      document.getElementById('date-range-display').textContent = 
+      document.getElementById('date-range-display').textContent =
         `${formatDate(viewDays[0])} ~ ${formatDate(viewDays[VISIBLE_DAYS - 1])}`;
 
       // 2. 渲染左側待分配任務
       const unassignedTasks = tasks.filter(t => !t.assigneeId || !t.startDate);
       document.getElementById('unassigned-count').textContent = unassignedTasks.length;
-      
-      const poolHtml = unassignedTasks.length === 0 
+
+      const poolHtml = unassignedTasks.length === 0
         ? `<div class="h-full flex items-center justify-center text-gray-400 text-sm">已全數排定</div>`
         : unassignedTasks.map(task => `
           <div
@@ -310,7 +392,7 @@
           const dateStr = formatDate(day);
           const isWeekend = day.getDay() === 0 || day.getDay() === 6;
           const cellId = `cell-${colleague.id}-${dateStr}`;
-          
+
           rowHtml += `
             <div 
               id="${cellId}"
@@ -326,31 +408,47 @@
         // 渲染絕對定位任務條
         const viewEndObj = addDays(viewStartDate, VISIBLE_DAYS - 1);
         const assignedTasks = tasks.filter(t => t.assigneeId === colleague.id && t.startDate);
-        
+
         assignedTasks.forEach(task => {
           const startObj = parseDate(task.startDate);
           const endObj = parseDate(task.endDate);
-          
+
           if (endObj < viewStartDate || startObj > viewEndObj) return; // 畫面外不渲染
 
           const offsetDays = getDaysDiff(viewStartDate, startObj);
           const durationDays = getDaysDiff(startObj, endObj) + 1;
-          
+
           const leftOffset = offsetDays * CELL_WIDTH;
           const width = durationDays * CELL_WIDTH;
           const topOffset = 10 + (taskLayouts[task.id] || 0) * (TASK_HEIGHT + TASK_GAP);
+
+          // 判斷是否正在被縮放，若是則移除過渡動畫避免視覺延遲
+          const isResizing = (resizingTaskId === task.id);
+          const transitionClass = isResizing ? '' : 'transition-all';
 
           rowHtml += `
             <div
               draggable="true"
               ondragstart="handleDragStart(event, '${task.id}')"
               ondragend="handleDragEnd(event)"
-              class="absolute rounded border shadow-sm cursor-move overflow-hidden whitespace-nowrap text-ellipsis px-2 py-1 flex items-center transition-all hover:brightness-95 hover:shadow-md z-10 ${task.color}"
+              class="absolute rounded border shadow-sm cursor-move overflow-hidden whitespace-nowrap text-ellipsis flex items-center ${transitionClass} hover:brightness-95 hover:shadow-md z-10 ${task.color}"
               style="left: ${leftOffset}px; width: ${width - 8}px; top: ${topOffset}px; height: ${TASK_HEIGHT}px; margin-left: 4px;"
               title="${task.title} (${task.startDate} ~ ${task.endDate})"
             >
-              <i data-lucide="grip-vertical" class="mr-1 w-3.5 h-3.5 opacity-50 flex-shrink-0"></i>
-              <span class="text-xs font-bold leading-none truncate">${task.title}</span>
+              <!-- 左側縮放把手 -->
+              <div 
+                class="resize-handle absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black/20 z-20" 
+                onmousedown="initResize(event, '${task.id}', 'left')">
+              </div>
+
+              <i data-lucide="grip-vertical" class="ml-2.5 mr-1 w-3.5 h-3.5 opacity-50 flex-shrink-0"></i>
+              <span class="text-xs font-bold leading-none truncate pr-3">${task.title}</span>
+
+              <!-- 右側縮放把手 -->
+              <div 
+                class="resize-handle absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black/20 z-20" 
+                onmousedown="initResize(event, '${task.id}', 'right')">
+              </div>
             </div>
           `;
         });
@@ -361,7 +459,7 @@
 
       document.getElementById('gantt-body').innerHTML = bodyHtml;
 
-      // 重新生成 Lucide Icons (因為 DOM 已被替換)
+      // 重新生成 Lucide Icons
       lucide.createIcons();
     };
 
@@ -370,4 +468,5 @@
 
   </script>
 </body>
+
 </html>
