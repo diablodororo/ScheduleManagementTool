@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 自訂拖曳時的視覺回饋樣式 */
+.drag-over-zone {
+  background-color: #eff6ff !important;
+  border-color: #bfdbfe !important;
+}
+
+.drag-over-pool {
+  background-color: rgba(239, 246, 255, 0.5) !important;
+  outline: 2px dashed #93c5fd !important;
+  outline-offset: -4px;
+}
+
+/* 捲軸樣式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* 縮放把手：橫式 */
+.task-bar.horizontal .resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px;
+  height: 16px;
+  border-left: 2px dotted transparent;
+  transition: border-color 0.15s;
+}
+
+/* 縮放把手：直式 */
+.task-bar.vertical .resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  height: 3px;
+  width: 20px;
+  border-top: 2px dotted transparent;
+  transition: border-color 0.15s;
+}
+
+.task-bar:hover .resize-handle::after {
+  border-left-color: rgba(0, 0, 0, 0.35);
+  border-top-color: rgba(0, 0, 0, 0.35);
+}
+
+.task-bar:hover .resize-handle {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* 縮放中顯示日期提示 */
+.resize-tooltip {
+  position: fixed;
+  pointer-events: none;
+  background: #1e293b;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  z-index: 9999;
+  transform: translate(-50%, -120%);
+}
